@@ -122,12 +122,13 @@ async function askReport(req, res) {
     try {
       sql = await generateSql(question);
     } catch (err) {
+      // Any provider failure (billing, network, rate limit, missing key) must
+      // never leak its raw message to the client. We log it server-side, then
+      // either degrade to the deterministic local router or fail cleanly.
       console.error('AI generation failed, trying local fallback:', err.message);
       const local = fallbackSqlForQuestion(question);
       if (!local) {
-        return res.status(500).json({
-          error: 'The assistant could not answer that right now. Please rephrase the question.',
-        });
+        return res.status(500).json({ error: 'Assistant unavailable (provider error)' });
       }
       sql = local.sql;
       mode = 'fallback';

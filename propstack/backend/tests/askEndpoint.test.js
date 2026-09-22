@@ -154,7 +154,7 @@ describe('POST /api/reports/ask', () => {
       expect(Array.isArray(res.body.data)).toBe(true);
     });
 
-    test('returns a generic 500 (with no provider detail leak) for unknown questions', async () => {
+    test('returns the generic provider-error message (never the raw detail) for unknown questions', async () => {
       const { owner } = await createLeaseFixture();
       ai.generateSql.mockRejectedValue(
         new Error('Your credit balance is too low to access the Anthropic API.')
@@ -166,7 +166,7 @@ describe('POST /api/reports/ask', () => {
         .send({ question: 'tell me the meaning of life' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toMatch(/could not answer/i);
+      expect(res.body.error).toBe('Assistant unavailable (provider error)');
       expect(res.body.detail).toBeUndefined();
       expect(JSON.stringify(res.body).toLowerCase()).not.toContain('credit balance');
     });

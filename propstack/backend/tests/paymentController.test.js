@@ -119,4 +119,25 @@ describe('Payments API', () => {
     expect(rows[0].status).toBe('paid');
     expect(Number(rows[0].late_fee_applied)).toBe(0);
   });
+
+  test('marking an already-paid payment returns it unchanged and does not re-stamp paid_date', async () => {
+    const { tenant, lease } = await createLeaseFixture();
+    const payment = await createPayment(lease.id, 1000, '2026-05-01', '2026-05-02'); // already paid
+    const before = (
+      await pool.query('SELECT paid_date FROM payments WHERE id = $1', [payment.id])
+    ).rows[0].paid_date.toISOString();
+
+    const res = await request(app)
+      .patch(`/api/payments/${payment.id}/mark-paid`)
+      .set('Authorization', `Bearer ${tokenFor(tenant)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('paid');
+    // the returned row keeps its original paid_date — no re-stamp to today
+    expect(String(res.body.paid_date)).toBe(before);
+
+    const { rows } = await pool.query('SELECT status, paid_date FROM payments WHERE id = $1', [payment.id]);
+    expect(rows[0].status).toBe('paid');
+    expect(rows[0].paid_date.toISOString()).toBe(before);
+  });
 });

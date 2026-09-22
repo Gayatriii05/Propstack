@@ -84,15 +84,18 @@ async function markPaid(req, res) {
   try {
     // Resolve the lease this payment belongs to, then apply the same
     // scope check as every other lease-level operation.
-    const leaseLookup = await pool.query(
-      'SELECT lease_id FROM payments WHERE id = $1',
-      [id]
-    );
+    const leaseLookup = await pool.query('SELECT * FROM payments WHERE id = $1', [id]);
     if (leaseLookup.rows.length === 0) {
       return res.status(404).json({ error: 'Payment not found' });
     }
-    if (!(await canAccessLease(req.user.id, leaseLookup.rows[0].lease_id))) {
+    const payment = leaseLookup.rows[0];
+    if (!(await canAccessLease(req.user.id, payment.lease_id))) {
       return res.status(403).json({ error: 'Not authorized for this lease' });
+    }
+
+    // Already paid: return the row untouched — never re-stamp paid_date.
+    if (payment.status === 'paid') {
+      return res.json(payment);
     }
 
     const result = await pool.query(
