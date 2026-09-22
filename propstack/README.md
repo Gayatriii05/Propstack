@@ -28,6 +28,24 @@ a hardened Express API, and a React + Tailwind frontend.
 - **Tested + CI** — Jest integration suite (auth + payment flows including the
   late-fee trigger) runs against a real PostgreSQL test database; GitHub Actions
   workflow runs it on every push.
+- **Natural-language SQL assistant** (owner/manager) — ask questions about your
+  portfolio in plain English (`POST /api/reports/ask`). An LLM (Anthropic) turns
+  the question into a single read-only `SELECT` scoped to `owner_id = $1`; a
+  keyword denylist (no DROP/DELETE/UPDATE/INSERT/ALTER/TRUNCATE/…), comment and
+  multi-statement checks, and an always-rolled-back `READ ONLY` transaction make
+  it impossible for the generated query to write. If the LLM is unreachable
+  (missing key, billing, network), the endpoint degrades to a deterministic
+  local SQL router for common portfolio questions — the same guard + read-only
+  connection still apply, and the response is flagged `mode: "fallback"`.
+- **Payment anomaly detection** (`GET /api/reports/anomalies`) — a window
+  function analyzes each tenant's payment history (`LAG()` + `AVG() OVER` over
+  their last 6 payments) and flags tenants whose latest payment ran notably
+  later than their own average, surfaced as an "Attention needed" card.
+- **PDF monthly report export** (`GET /api/reports/monthly-pdf`) — downloads an
+  A4 PDF with the occupancy table, monthly revenue table, and a native bar chart
+  of cumulative revenue. The summary paragraph is written by the LLM and, if
+  that fails, a deterministic summary is generated from the numbers in hand so
+  the export always succeeds.
 
 ## Stack
 
@@ -35,6 +53,8 @@ a hardened Express API, and a React + Tailwind frontend.
 - **Backend**: Node.js + Express + pg
 - **DB**: PostgreSQL (schema, triggers, and views all in SQL)
 - **Auth**: JWT + bcrypt
+- **AI**: Anthropic API (`@anthropic-ai/sdk`) for SQL generation + report summaries
+- **PDF**: pdfkit
 - **Tests/CI**: Jest + Supertest, GitHub Actions
 
 ## Project layout
@@ -66,6 +86,9 @@ Requirements: Node 18+ and PostgreSQL 14+ (tested on Node 22 / PostgreSQL 17).
 cd backend
 npm install
 cp .env.example .env      # set DATABASE_URL + a long random JWT_SECRET
+# optional (SQL assistant + report summaries):
+#   ANTHROPIC_API_KEY=sk-ant-...   (https://console.anthropic.com/)
+#   ANTHROPIC_MODEL=claude-sonnet-4-5
 # create the database:  psql -U postgres -c "CREATE DATABASE propstack;"
 npm run db:setup          # runs schema.sql -> triggers.sql -> views.sql -> seed.sql
 npm run dev               # http://localhost:5000
@@ -123,6 +146,10 @@ overrides its connection string) and reset the schema on every run.
 | GET /api/reports/revenue | owner/manager | Monthly revenue report |
 | GET /api/reports/top-units | owner/manager | Rank units by revenue (window fn) |
 | GET /api/reports/running-total | owner/manager | Cumulative revenue (window fn) |
+| POST /api/reports/ask | owner/manager | Natural-language SQL assistant (returns generated SQL + results) |
+| GET /api/reports/anomalies | owner/manager | Flag tenants straying from their own payment history |
+| GET /api/reports/monthly-pdf | owner/manager | Download monthly report as PDF (with AI summary) |
+| GET /api/users?role=tenant | owner/manager | List users (role filter), no password fields |
 | POST /api/maintenance | tenant | Raise a maintenance ticket |
 | PATCH /api/maintenance/:id/status | owner/manager | Update ticket status |
 | GET /health | — | Liveness check |"# Propstack" 

@@ -44,6 +44,7 @@ export default function OwnerDashboard() {
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [anomalies, setAnomalies] = useState([]);
 
   const [showPropForm, setShowPropForm] = useState(false);
   const [propForm, setPropForm] = useState({ name: '', address: '', city: '' });
@@ -55,6 +56,11 @@ export default function OwnerDashboard() {
   const [leaseForm, setLeaseForm] = useState({ unit_id: '', tenant_id: '', start_date: '', end_date: '', monthly_rent: '', security_deposit: '' });
   const [tenants, setTenants] = useState([]);
   const [leaseUnits, setLeaseUnits] = useState([]);
+
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askLoading, setAskLoading] = useState(false);
+  const [askResponse, setAskResponse] = useState(null);
+  const [showSql, setShowSql] = useState(false);
 
   const loadLeases = async (page = 1) => {
     try {
@@ -69,16 +75,18 @@ export default function OwnerDashboard() {
   const load = async () => {
     setLoading(true);
     try {
-      const [p, o, r, rt] = await Promise.all([
+      const [p, o, r, rt, an] = await Promise.all([
         api.get('/properties'),
         api.get('/reports/occupancy'),
         api.get('/reports/revenue'),
         api.get('/reports/running-total'),
+        api.get('/reports/anomalies'),
       ]);
       setProperties(p.data);
       setOccupancy(o.data);
       setRevenue(r.data);
       setRunningTotal(rt.data);
+      setAnomalies(an.data.data);
 
       const uMap = {};
       for (const prop of p.data) {
@@ -165,6 +173,37 @@ export default function OwnerDashboard() {
     }
   };
 
+  const handleAsk = async (e) => {
+    e.preventDefault();
+    if (!askQuestion.trim() || askLoading) return;
+    setAskLoading(true);
+    try {
+      const { data } = await api.post('/reports/ask', { question: askQuestion });
+      setAskResponse({ question: askQuestion, sql: data.sql, data: data.data });
+      setShowSql(false);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to ask');
+    } finally {
+      setAskLoading(false);
+    }
+  };
+
+  const downloadMonthlyReport = async () => {
+    try {
+      const res = await api.get('/reports/monthly-pdf', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'propstack-monthly-report.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to download report');
+    }
+  };
+
   const openLeaseForm = () => {
     setShowLeaseForm(true);
     loadLeaseOptions();
@@ -180,7 +219,30 @@ export default function OwnerDashboard() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">Owner Dashboard</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Owner Dashboard</h1>
+        <button
+          onClick={downloadMonthlyReport}
+          className="text-sm bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700"
+        >
+          Download Monthly Report
+        </button>
+      </div>
+
+      {/* Attention needed */}
+      <Section title="Attention needed">
+        {anomalies.length === 0 ? (
+          <p className="text-sm text-gray-400">All tenants are paying within their usual pattern.</p>
+        ) : (
+          <ul className="space-y-2">
+            {anomalies.map(a => (
+              <li key={a.tenant_id} className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                {a.reason}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
       {/* Properties */}
       <Section title="Properties">
@@ -322,6 +384,48 @@ export default function OwnerDashboard() {
           </button>
         </div>
       </Section>
+
+      {/* Ask Assistant */}
+      <Section title="Ask about your portfolio">
+        <form onSubmit={handleAsk} className="flex gap-3 mb-4">
+          <input
+            placeholder="Ask about your portfolio... e.g. show me units with overdue payments"
+            value={askQuestion}
+            onChange={e => setAskQuestion(e.target.value)}
+            className="flex-1 border rounded px-3 py-2 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={askLoading || !askQuestion.trim()}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+          >
+            {askLoading ? 'Thinking...' : 'Ask'}
+          </button>
+        </form>
+        {askResponse && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600"><span className="font-medium">Q:</span> {askResponse.question}</p>
+            <button
+              onClick={() => setShowSql(!showSql)}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              {showSql ? 'Hide generated SQL' : 'Show generated SQL'}
+            </button>
+            {showSql && (
+              <pre className="bg-gray-900 text-green-300 text-xs p-3 rounded overflow-x-auto">{askResponse.sql}</pre>
+            )}
+            <Table
+              columns={Object.keys(askResponse.data?.[0] || {}).map(k => ({
+                key: k,
+                label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+              }))}
+              rows={askResponse.data}
+              emptyMsg="No results"
+            />
+          </div>
+        )}
+      </Section>
+
       <Section title="Occupancy Report">
         <Table
           columns={[
